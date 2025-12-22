@@ -27,12 +27,14 @@ public class MapRenderer : MonoBehaviour
         {
             for (int y = 0; y < height; y++)
             {
+                TileType type = mapSystem.grid[x, y].type;
+                GameObject prefab = GetPrefab(type);
+
                 Vector3 pos = new Vector3(x * tileSize, 0, y * tileSize);
-                spawnedTiles[x, y] = Instantiate(floorPrefab, pos, Quaternion.identity, transform);
+                spawnedTiles[x, y] = Instantiate(prefab, pos, Quaternion.identity, transform);
             }
         }
     }
-
 
     GameObject GetPrefab(TileType type)
     {
@@ -43,9 +45,10 @@ public class MapRenderer : MonoBehaviour
             case TileType.River: return riverPrefab;
             case TileType.Start: return startPrefab;
             case TileType.End: return endPrefab;
+            default: return floorPrefab;
         }
-        return null;
     }
+
 
     void ClearMap()
     {
@@ -53,7 +56,8 @@ public class MapRenderer : MonoBehaviour
 
         foreach (var obj in spawnedTiles)
         {
-            if (obj != null) Destroy(obj);
+            if (obj != null) DestroyImmediate(obj);
+            //if (obj != null) Destroy(obj);
         }
     }
 }
