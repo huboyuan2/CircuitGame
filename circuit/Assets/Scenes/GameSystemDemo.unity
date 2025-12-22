@@ -655,6 +655,7 @@ MonoBehaviour:
   startPrefab: {fileID: 7331093425478395513, guid: 0f1f0df0a7fde6049b318f704193e37e, type: 3}
   endPrefab: {fileID: 3258332852948371370, guid: d7960a1e5323d424b8ace3285eac511b, type: 3}
   tileSize: 3
+  cameraController: {fileID: 2060207563}
 --- !u!4 &839118809
 Transform:
   m_ObjectHideFlags: 0
