@@ -11,6 +11,7 @@ public class MapRenderer : MonoBehaviour
     public GameObject startPrefab;
     public GameObject endPrefab;
     public float tileSize = 3f; // set this in Inspector
+    public CameraController cameraController;
 
     private GameObject[,] spawnedTiles;
 
@@ -34,6 +35,9 @@ public class MapRenderer : MonoBehaviour
                 spawnedTiles[x, y] = Instantiate(prefab, pos, Quaternion.identity, transform);
             }
         }
+
+        if (cameraController != null) 
+            cameraController.PositionCamera();
     }
 
     GameObject GetPrefab(TileType type)

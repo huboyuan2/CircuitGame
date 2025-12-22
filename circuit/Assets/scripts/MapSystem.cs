@@ -85,8 +85,12 @@ public class MapSystem : MonoBehaviour
         string json = File.ReadAllText(path);
         Map data = JsonUtility.FromJson<Map>(json);
 
+
+
         width = data.width;
         height = data.height;
+
+        Debug.Log("Loaded map of size: " + width + "x" + height);
 
         grid = new TileData[width, height];
 

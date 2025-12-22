@@ -14,8 +14,7 @@ public class CameraController : MonoBehaviour
     {
         PositionCamera();
     }
-
-    void PositionCamera()
+    public void PositionCamera()
     {
         float centerX = mapSystem.width / 2f;
         float centerY = mapSystem.height / 2f;
