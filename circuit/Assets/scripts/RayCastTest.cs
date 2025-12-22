@@ -59,6 +59,9 @@ public class RayCastTest : MonoBehaviour
             if (!isDragging && dragDistance > dragThreshold)
             {
                 isDragging = true;
+
+                //it works, but I dont know 1.5 make it transparent
+                selectedBlock?.SetDitherTransparency(1.5f);
             }
 
             if (isDragging)
@@ -139,6 +142,7 @@ public class RayCastTest : MonoBehaviour
             if (block != null)
             {
                 selectedBlock = block;
+                
                 mouseDownPosition = screenPosition; // Record pressed position
                 originalPosition = block.transform.position;
                 
@@ -171,7 +175,7 @@ public class RayCastTest : MonoBehaviour
         {
             return;
         }
-
+        selectedBlock.SetDitherTransparency(1.0f);
         Ray ray = mainCamera.ScreenPointToRay(screenPosition);
         RaycastHit hit;
 

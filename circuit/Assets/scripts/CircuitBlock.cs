@@ -7,8 +7,10 @@ public class CircuitBlock : MonoBehaviour
 {
     public List<bool> wasdBoundaryConnection = new List<bool>();
     public short rotateStatus = 0;
-    Transform children;
-
+    Transform child;
+    //private Renderer rend;
+    private Material material;
+    private Material childMat;
     // Animation settings
     [SerializeField] private float rotationDuration = 0.3f; // Duration of rotation animation
     [SerializeField] private Ease rotationEase = Ease.OutQuad; // Easing function for smooth rotation
@@ -18,7 +20,20 @@ public class CircuitBlock : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        children = transform.Find("Cube");
+        child = transform.Find("Cube");
+        Renderer rend = GetComponent<Renderer>();
+        if (rend != null)
+        {
+            material = rend.material;
+        }
+        if (child)
+        {
+            Renderer childrend =child.GetComponent<Renderer>();
+            if (childrend != null)
+            {
+                childMat = childrend.material;
+            }
+        }
     }
 
     // Update is called once per frame
@@ -29,12 +44,12 @@ public class CircuitBlock : MonoBehaviour
 
     void ClockWiseRotete()
     {
-        if (isRotating || children == null) return;
+        if (isRotating || child == null) return;
 
         isRotating = true;
 
         // Perform rotation animation with DOTween
-        children.DORotate(children.eulerAngles + new Vector3(0, 90, 0), rotationDuration, RotateMode.FastBeyond360)
+        child.DORotate(child.eulerAngles + new Vector3(0, 90, 0), rotationDuration, RotateMode.FastBeyond360)
             .SetEase(rotationEase)
             .OnComplete(() =>
             {
@@ -45,12 +60,12 @@ public class CircuitBlock : MonoBehaviour
 
     void AnticlockWiseRotete()
     {
-        if (isRotating || children == null) return;
+        if (isRotating || child == null) return;
 
         isRotating = true;
 
         // Perform rotation animation with DOTween
-        children.DORotate(children.eulerAngles + new Vector3(0, -90, 0), rotationDuration, RotateMode.FastBeyond360)
+        child.DORotate(child.eulerAngles + new Vector3(0, -90, 0), rotationDuration, RotateMode.FastBeyond360)
             .SetEase(rotationEase)
             .OnComplete(() =>
             {
@@ -104,9 +119,22 @@ public class CircuitBlock : MonoBehaviour
     // Stop any ongoing rotation (optional utility method)
     void OnDestroy()
     {
-        if (children != null)
+        if (child != null)
         {
-            children.DOKill();
+            child.DOKill();
+        }
+    }
+    public void SetDitherTransparency(float ditherval)
+    {
+        if (material != null && material.HasProperty("_ditheralpha"))
+        {
+            material.SetFloat("_ditheralpha",ditherval);
+            
+        }
+        if (childMat != null && childMat.HasProperty("_ditheralpha"))
+        {
+            childMat.SetFloat("_ditheralpha", ditherval);
+
         }
     }
 }
