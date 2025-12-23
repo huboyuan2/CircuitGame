@@ -17,6 +17,20 @@ public class WirePlacementController : MonoBehaviour
         {
             TryPlaceWireAtMouse();
         }
+        if (Input.GetKeyDown(KeyCode.Equals))
+        {
+            int nextType = (int)currentWireType + 1;
+            int enumLength = System.Enum.GetValues(typeof(WireType)).Length;
+            currentWireType = (WireType)(nextType % enumLength);
+            Debug.Log($"Switched to wire type: {currentWireType}");
+        }
+        if (Input.GetKeyDown(KeyCode.Minus))
+        {
+            int prevType = (int)currentWireType - 1;
+            int enumLength = System.Enum.GetValues(typeof(WireType)).Length;
+            currentWireType = (WireType)((prevType + enumLength) % enumLength);
+            Debug.Log($"Switched to wire type: {currentWireType}");
+        }
     }
 
     void TryPlaceWireAtMouse()

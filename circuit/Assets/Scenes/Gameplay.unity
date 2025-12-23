@@ -371,6 +371,10 @@ MonoBehaviour:
   energyLossWirePrefab: {fileID: 919132149155446097, guid: 7d5dfaa4f716b6e4a96137cfcd8d4145, type: 3}
   rechargeWirePrefab: {fileID: 919132149155446097, guid: 88768f8db77798b40b64a84175892884, type: 3}
   teleportWirePrefab: {fileID: 919132149155446097, guid: 22baae8a531a5e04e9aa4ac7f1907371, type: 3}
+  XWirePrefab: {fileID: 5890986289524754777, guid: 18ee489d00e583e4a93005db5a3fa757, type: 3}
+  TWirePrefab: {fileID: 5890986289524754777, guid: a717208056f52ab49ae0d2ffb92d1d74, type: 3}
+  LWirePrefab: {fileID: 5890986289524754777, guid: 6cba3506a60aba54aa5836408c71e8a2, type: 3}
+  IWirePrefab: {fileID: 5890986289524754777, guid: 196cb4582b77c994daef33f8620e91fc, type: 3}
   tileSize: 3
 --- !u!4 &875710006
 Transform:

@@ -7,7 +7,11 @@ public enum WireType
     Normal,
     EnergyLoss,
     Recharge,
-    Teleport
+    Teleport,
+    Xwire,
+    Twire,
+    Lwire,
+    Iwire
 }
 
 public class WireSystem : MonoBehaviour
