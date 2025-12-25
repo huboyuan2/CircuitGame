@@ -16,8 +16,32 @@ public enum WireType
     // Can add up to 247 more types (9-255)
 }
 
+public class WireNode { public Vector2Int pos; public List<WireNode> neighbors = new List<WireNode>(); public WireNode(int x, int y) { pos = new Vector2Int(x, y); } }
+public class WireGraph { public Dictionary<Vector2Int, WireNode> nodes = new Dictionary<Vector2Int, WireNode>(); }
+
 public class WireSystem : MonoBehaviour
 {
+    // Directions: indices must match dx, dy
+    private static readonly int[] dx = { 1, -1, 0, 0 }; // Right, Left, Up, Down
+    private static readonly int[] dy = { 0, 0, 1, -1 }; // Right, Left, Up, Down
+
+    // Bit for each direction in a 4-bit mask
+    // bit 0: Right, bit 1: Left, bit 2: Up, bit 3: Down
+    private const int DIR_RIGHT = 1 << 0;
+    private const int DIR_LEFT = 1 << 1;
+    private const int DIR_UP = 1 << 2;
+    private const int DIR_DOWN = 1 << 3;
+
+    private int GetOppositeDirBit(int dirBit)
+    {
+        if (dirBit == DIR_RIGHT) return DIR_LEFT;
+        if (dirBit == DIR_LEFT) return DIR_RIGHT;
+        if (dirBit == DIR_UP) return DIR_DOWN;
+        if (dirBit == DIR_DOWN) return DIR_UP;
+        return 0;
+    }
+
+
     public MapSystem mapSystem;
     public WireRenderer wireRenderer;
 
@@ -292,4 +316,195 @@ public class WireSystem : MonoBehaviour
         
         Debug.Log($"Tile ({x},{y}): Type={type}, Rotation={rotation * 90}¡ã, Raw=0x{tile:X} ({tile})");
     }
+
+    // convert to Wire Graph
+    public WireGraph BuildGraph()
+    {
+        WireGraph graph = new WireGraph();
+
+        // 1. Create nodes for all valid tiles
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                TileType tileType = mapSystem.grid[x, y].type;
+                WireType wireType = GetWireType(x, y);
+
+                if (tileType == TileType.Start ||
+                    tileType == TileType.End ||
+                    wireType != WireType.None)
+                {
+                    graph.nodes[new Vector2Int(x, y)] = new WireNode(x, y);
+                }
+            }
+        }
+
+        // 2. Build adjacency (normal wires)
+        foreach (var kv in graph.nodes)
+        {
+            Vector2Int pos = kv.Key;
+            WireNode node = kv.Value;
+
+            int mask = GetConnectionMaskAt(pos.x, pos.y);
+
+            for (int dir = 0; dir < 4; dir++)
+            {
+                int nx = pos.x + dx[dir];
+                int ny = pos.y + dy[dir];
+
+                Vector2Int np = new Vector2Int(nx, ny);
+                if (!graph.nodes.ContainsKey(np))
+                    continue;
+
+                int dirBit = 1 << dir;
+                if ((mask & dirBit) == 0)
+                    continue;
+
+                int neighborMask = GetConnectionMaskAt(nx, ny);
+                int oppositeBit = GetOppositeDirBit(dirBit);
+
+                if ((neighborMask & oppositeBit) == 0)
+                    continue;
+
+                node.neighbors.Add(graph.nodes[np]);
+            }
+        }
+
+        // 3. Teleport edges
+        List<Vector2Int> teleports = new List<Vector2Int>();
+        foreach (var kv in graph.nodes)
+        {
+            if (GetWireType(kv.Key.x, kv.Key.y) == WireType.Teleport)
+                teleports.Add(kv.Key);
+        }
+
+        // All teleports connect to all teleports
+        for (int i = 0; i < teleports.Count; i++)
+        {
+            for (int j = 0; j < teleports.Count; j++)
+            {
+                if (i == j) continue;
+
+                var a = graph.nodes[teleports[i]];
+                var b = graph.nodes[teleports[j]];
+
+                a.neighbors.Add(b);
+            }
+        }
+
+        return graph;
+    }
+
+    // Get connection mask for a wire type with a given rotation (0–3).
+    // Bits: Right, Left, Up, Down.
+    // Start/End tiles will be handled separately as "connect all".
+    private int GetConnectionMask(WireType type, int rotation)
+    {
+        // Normalize rotation just in case
+        rotation = ((rotation % 4) + 4) % 4;
+
+        // Basic wires: treat as 4-way (you can change this later if needed)
+        if (type == WireType.Normal ||
+            type == WireType.EnergyLoss ||
+            type == WireType.Recharge ||
+            type == WireType.Teleport ||
+            type == WireType.Xwire)
+        {
+            // All directions open
+            return DIR_RIGHT | DIR_LEFT | DIR_UP | DIR_DOWN;
+        }
+
+        // Base masks defined for rotation = 0
+        int baseMask = 0;
+
+        switch (type)
+        {
+            case WireType.Iwire:
+                // Horizontal: Left <-> Right
+                baseMask = DIR_RIGHT | DIR_LEFT;
+                break;
+
+            case WireType.Lwire:
+                // L shape: Up + Right (like L rotated 90° CCW visually)
+                baseMask = DIR_UP | DIR_RIGHT;
+                break;
+
+            case WireType.Twire:
+                // T shape: Up + Left + Right (missing Down)
+                baseMask = DIR_UP | DIR_LEFT | DIR_RIGHT;
+                break;
+
+            default:
+                // No connections for None or unknown
+                return 0;
+        }
+
+        // Apply rotation steps
+        return RotateMask(baseMask, rotation);
+    }
+
+    private int RotateMask(int mask, int rotation)
+    {
+        // We model directions as indices: 0=Right,1=Left,2=Up,3=Down.
+        // Rotation: each step rotates 90° clockwise.
+        bool[] dirs = new bool[4];
+        dirs[0] = (mask & DIR_RIGHT) != 0;
+        dirs[1] = (mask & DIR_LEFT) != 0;
+        dirs[2] = (mask & DIR_UP) != 0;
+        dirs[3] = (mask & DIR_DOWN) != 0;
+
+        bool[] rotated = new bool[4];
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (!dirs[i]) continue;
+
+            // Map index -> mask bit
+            int bit = 0;
+            if (i == 0) bit = DIR_RIGHT;
+            if (i == 1) bit = DIR_LEFT;
+            if (i == 2) bit = DIR_UP;
+            if (i == 3) bit = DIR_DOWN;
+
+            // Apply rotation steps
+            int newIndex = (i + rotation) % 4;
+
+            if (newIndex == 0) rotated[0] = true; // Right
+            if (newIndex == 1) rotated[1] = true; // Left
+            if (newIndex == 2) rotated[2] = true; // Up
+            if (newIndex == 3) rotated[3] = true; // Down
+        }
+
+        int result = 0;
+        if (rotated[0]) result |= DIR_RIGHT;
+        if (rotated[1]) result |= DIR_LEFT;
+        if (rotated[2]) result |= DIR_UP;
+        if (rotated[3]) result |= DIR_DOWN;
+
+        return result;
+    }
+
+    // Convenience: get connection mask at a grid position
+    private int GetConnectionMaskAt(int x, int y)
+    {
+        if (!IsValidPosition(x, y))
+            return 0;
+
+        TileType tileType = mapSystem.grid[x, y].type;
+
+        // Start and End act as fully connectable nodes
+        if (tileType == TileType.Start || tileType == TileType.End)
+        {
+            return DIR_RIGHT | DIR_LEFT | DIR_UP | DIR_DOWN;
+        }
+
+        WireType wireType = GetWireType(x, y);
+        if (wireType == WireType.None)
+            return 0;
+
+        int rotation = GetRotation(x, y);
+        return GetConnectionMask(wireType, rotation);
+    }
+
+
 }
