@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Generic;
+using Unity.VisualScripting;
 using UnityEngine;
 
 // Enum values now fit in 8 bits (supports up to 256 types)
@@ -103,6 +105,7 @@ public class WireSystem : MonoBehaviour
             return false;
 
         wireGrid[GetIndex(x, y)] = EncodeTile(type, rotation);
+        graphDirty = true;  // make graph dirty (needs rebuilding)
         return true;
     }
 
@@ -159,6 +162,7 @@ public class WireSystem : MonoBehaviour
         rotation = clockwise ? (rotation + 1) % 4 : (rotation + 3) % 4;
         
         wireGrid[index] = EncodeTile(type, rotation);
+        graphDirty = true;  // make graph dirty (needs rebuilding)
     }
 
     // Remove wire at position
@@ -181,7 +185,7 @@ public class WireSystem : MonoBehaviour
 
         // Swap entire encoded values (type + rotation)
         (wireGrid[index1], wireGrid[index2]) = (wireGrid[index2], wireGrid[index1]);
-
+        graphDirty = true;  // make graph dirty (needs rebuilding)
         return true;
     }
 
@@ -214,7 +218,7 @@ public class WireSystem : MonoBehaviour
 
         // Clear source position
         wireGrid[sourceIndex] = 0;
-
+        graphDirty = true;  // make graph dirty (needs rebuilding)
         return true;
     }
 
@@ -240,58 +244,119 @@ public class WireSystem : MonoBehaviour
         return new Vector2Int(-1, -1);
     }
 
-    public bool CheckWin()
+    private WireGraph cachedGraph = null;
+    private bool graphDirty = true;
+
+    //// set dirty when placing wire
+    //public bool PlaceWire(int x, int y, WireType type, int rotation = 0)
+    //{
+    //    if (!IsValidWirePlacement(x, y)) return false;
+    //    wireGrid[GetIndex(x, y)] = EncodeTile(type, rotation);
+    //    graphDirty = true;  //need to rebuild graph
+    //    return true;
+    //}
+
+    public class PathResult
+{
+    public bool found;
+    public List<Vector2Int> path;  // list of grid positions from start to end
+
+        public PathResult(bool found, List<Vector2Int> path = null)
     {
-        Vector2Int start = FindTile(TileType.Start);
-        Vector2Int end = FindTile(TileType.End);
+        this.found = found;
+        this.path = path ?? new List<Vector2Int>();
+    }
+}
 
-        if (start.x < 0 || end.x < 0)
-            return false;
+public PathResult FindPath()
+{
+        // cache graph if dirty
+        if (graphDirty)
+    {
+        cachedGraph = BuildGraph();
+        graphDirty = false;
+    }
 
-        bool[,] visited = new bool[width, height];
-        Queue<Vector2Int> queue = new Queue<Vector2Int>();
+    Vector2Int start = FindTile(TileType.Start);
+    Vector2Int end = FindTile(TileType.End);
 
-        queue.Enqueue(start);
-        visited[start.x, start.y] = true;
+    if (!cachedGraph.nodes.ContainsKey(start) || !cachedGraph.nodes.ContainsKey(end))
+        return new PathResult(false);
 
-        int[] dx = { 1, -1, 0, 0 };
-        int[] dy = { 0, 0, 1, -1 };
+    // BFS Data Structures
+    HashSet<WireNode> visited = new HashSet<WireNode>();
+    Queue<WireNode> queue = new Queue<WireNode>();
+    Dictionary<WireNode, WireNode> cameFrom = new Dictionary<WireNode, WireNode>();  // record parent
 
-        while (queue.Count > 0)
+    WireNode startNode = cachedGraph.nodes[start];
+    WireNode endNode = cachedGraph.nodes[end];
+    
+    queue.Enqueue(startNode);
+    visited.Add(startNode);
+    cameFrom[startNode] = null;  // start has no parent
+
+    // BFS search
+    while (queue.Count > 0)
+    {
+        WireNode current = queue.Dequeue();
+
+        // found end node, reconstruct path
+        if (current == endNode)
         {
-            var pos = queue.Dequeue();
-
-            if (pos == end)
-                return true;
-
-            for (int i = 0; i < 4; i++)
-            {
-                int nx = pos.x + dx[i];
-                int ny = pos.y + dy[i];
-
-                if (nx < 0 || nx >= width || ny < 0 || ny >= height)
-                    continue;
-
-                if (visited[nx, ny])
-                    continue;
-
-                // Use GetWireType instead of direct array access
-                WireType wireType = GetWireType(nx, ny);
-                bool isWire = wireType != WireType.None;
-                bool isStartOrEnd =
-                    mapSystem.grid[nx, ny].type == TileType.Start ||
-                    mapSystem.grid[nx, ny].type == TileType.End;
-
-                if (isWire || isStartOrEnd)
-                {
-                    visited[nx, ny] = true;
-                    queue.Enqueue(new Vector2Int(nx, ny));
-                }
-            }
+            return new PathResult(true, ReconstructPath(cameFrom, startNode, endNode));
         }
 
-        return false;
+        foreach (WireNode neighbor in current.neighbors)
+        {
+            if (!visited.Contains(neighbor))
+            {
+                visited.Add(neighbor);
+                queue.Enqueue(neighbor);
+                cameFrom[neighbor] = current;  // record parent for neighbor
+                }
+        }
     }
+
+    return new PathResult(false);
+}
+
+    // ReconstructPath from end to start using cameFrom map
+    private List<Vector2Int> ReconstructPath(
+    Dictionary<WireNode, WireNode> cameFrom, 
+    WireNode start, 
+    WireNode end)
+{
+    List<Vector2Int> path = new List<Vector2Int>();
+    WireNode current = end;
+
+        // from end to start
+        while (current != null)
+    {
+        path.Add(current.pos);
+        cameFrom.TryGetValue(current, out current);
+    }
+
+        // reverse the path to get it from start to end
+        path.Reverse();
+    
+    return path;
+}
+
+    // Only check connectivity for win condition
+    public bool CheckWin()
+{
+        var result = FindPath();
+        if (result.found)
+        {
+            StartCoroutine(wireRenderer.AnimatePath(result.path, Color.green));
+        }
+        else 
+        {
+            // When start and end are disconnected, set all CircuitBlocks to red
+            wireRenderer.SetAllCircuitBlocksColor(Color.red);
+        }
+            return result.found;
+}
 
     // Utility: Check if wire type needs rotation (L/T/I shapes)
     public bool WireNeedsRotation(WireType type)
@@ -395,13 +460,14 @@ public class WireSystem : MonoBehaviour
         return graph;
     }
 
-    // Get connection mask for a wire type with a given rotation (0–3).
+    // Get connection mask for a wire type with a given rotation (0?).
     // Bits: Right, Left, Up, Down.
     // Start/End tiles will be handled separately as "connect all".
     private int GetConnectionMask(WireType type, int rotation)
     {
+        Debug.Log($"Getting connection mask for type {type} with rotation {rotation}");
         // Normalize rotation just in case
-        rotation = ((rotation % 4) + 4) % 4;
+        rotation = (rotation + 4) % 4;
 
         // Basic wires: treat as 4-way (you can change this later if needed)
         if (type == WireType.Normal ||
@@ -420,18 +486,18 @@ public class WireSystem : MonoBehaviour
         switch (type)
         {
             case WireType.Iwire:
-                // Horizontal: Left <-> Right
-                baseMask = DIR_RIGHT | DIR_LEFT;
+                // Horizontal: Up <-> Down
+                baseMask = DIR_UP | DIR_DOWN;
                 break;
 
             case WireType.Lwire:
-                // L shape: Up + Right (like L rotated 90° CCW visually)
+                // L shape: Up + Right (like L rotated 90?CCW visually)
                 baseMask = DIR_UP | DIR_RIGHT;
                 break;
 
             case WireType.Twire:
-                // T shape: Up + Left + Right (missing Down)
-                baseMask = DIR_UP | DIR_LEFT | DIR_RIGHT;
+                // T shape: Down + Left + Right (missing UP)
+                baseMask = DIR_DOWN | DIR_LEFT | DIR_RIGHT;
                 break;
 
             default:
@@ -445,41 +511,35 @@ public class WireSystem : MonoBehaviour
 
     private int RotateMask(int mask, int rotation)
     {
-        // We model directions as indices: 0=Right,1=Left,2=Up,3=Down.
-        // Rotation: each step rotates 90° clockwise.
-        bool[] dirs = new bool[4];
-        dirs[0] = (mask & DIR_RIGHT) != 0;
-        dirs[1] = (mask & DIR_LEFT) != 0;
-        dirs[2] = (mask & DIR_UP) != 0;
-        dirs[3] = (mask & DIR_DOWN) != 0;
+        //normalize rotation
+        rotation = (rotation + 4) % 4;
 
-        bool[] rotated = new bool[4];
-
-        for (int i = 0; i < 4; i++)
+        // Clockwise Rotate rule: Right ¡ú Down ¡ú Left ¡ú Up ¡ú Right
+        int[,] rotationMap = new int[4, 4]
         {
-            if (!dirs[i]) continue;
+        // rotation=0 (Clockwise rotate 0¡ã)
+        { DIR_RIGHT, DIR_LEFT, DIR_UP, DIR_DOWN },
 
-            // Map index -> mask bit
-            int bit = 0;
-            if (i == 0) bit = DIR_RIGHT;
-            if (i == 1) bit = DIR_LEFT;
-            if (i == 2) bit = DIR_UP;
-            if (i == 3) bit = DIR_DOWN;
+        // rotation=1 (Clockwise rotate 90¡ã)
+        // Right¡úDown, Left¡úUp, Up¡úRight, Down¡úLeft
+        { DIR_DOWN, DIR_UP, DIR_RIGHT, DIR_LEFT },
 
-            // Apply rotation steps
-            int newIndex = (i + rotation) % 4;
+        // rotation=2 (Clockwise rotate 180¡ã)
+        // Right¡úLeft, Left¡úRight, Up¡úDown, Down¡úUp
+        { DIR_LEFT, DIR_RIGHT, DIR_DOWN, DIR_UP },
 
-            if (newIndex == 0) rotated[0] = true; // Right
-            if (newIndex == 1) rotated[1] = true; // Left
-            if (newIndex == 2) rotated[2] = true; // Up
-            if (newIndex == 3) rotated[3] = true; // Down
-        }
+        // rotation=3 (Clockwise rotate 270¡ã)
+        // Right¡úUp, Left¡úDown, Up¡úLeft, Down¡úRight
+        { DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT }
+        };
 
         int result = 0;
-        if (rotated[0]) result |= DIR_RIGHT;
-        if (rotated[1]) result |= DIR_LEFT;
-        if (rotated[2]) result |= DIR_UP;
-        if (rotated[3]) result |= DIR_DOWN;
+
+        // check each direction in the original mask and map it
+        if ((mask & DIR_RIGHT) != 0) result |= rotationMap[rotation, 0];
+        if ((mask & DIR_LEFT) != 0) result |= rotationMap[rotation, 1];
+        if ((mask & DIR_UP) != 0) result |= rotationMap[rotation, 2];
+        if ((mask & DIR_DOWN) != 0) result |= rotationMap[rotation, 3];
 
         return result;
     }
@@ -506,5 +566,57 @@ public class WireSystem : MonoBehaviour
         return GetConnectionMask(wireType, rotation);
     }
 
+    //private IEnumerator AnimatePath(List<Vector2Int> path)
+    //{
+    //    foreach (Vector2Int pos in path)
+    //    {
+    //        HighlightTile(pos, Color.green);
+    //        //PlayPathEffect(pos);
+    //        yield return new WaitForSeconds(0.3f);
+    //    }
+
+    //    Debug.Log("finished animating path");
+    //}
+
+    //private void HighlightTile(Vector2Int pos, Color color)
+    //{
+    //    //find tile GameObject and change its color
+    //    GameObject tile = wireRenderer.GetWireObject(pos.x, pos.y);
+    //    if (tile != null)
+    //    {
+    //        //Renderer rend = tile.GetComponent<Renderer>();
+    //        //if (rend != null)
+    //        //{
+    //        //    rend.material.color = color;
+    //        //}
+    //        CircuitBlock circuitBlock = tile.GetComponent<CircuitBlock>();
+    //        if (circuitBlock != null)
+    //        {
+    //            circuitBlock.SetColor(color);
+    //        }
+    //    }
+    //}
+    //private void SetAllCircuitBlocksColor(Color color)
+    //{
+    //    for (int x = 0; x < width; x++)
+    //    {
+    //        for (int y = 0; y < height; y++)
+    //        {
+    //            WireType wireType = GetWireType(x, y);
+    //            if (wireType != WireType.None)
+    //            {
+    //                GameObject tile = wireRenderer.GetWireObject(x, y);
+    //                if (tile != null)
+    //                {
+    //                    CircuitBlock circuitBlock = tile.GetComponent<CircuitBlock>();
+    //                    if (circuitBlock != null)
+    //                    {
+    //                        circuitBlock.SetColor(color);
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
+    //}
 
 }

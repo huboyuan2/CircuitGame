@@ -137,4 +137,17 @@ public class CircuitBlock : MonoBehaviour
 
         }
     }
+    public void SetColor(Color color)
+    {
+        //if (material != null && material.HasProperty("_Color"))
+        //{
+        //    material.SetFloat("_Color", colorValue);
+
+        //}
+        if (childMat != null && childMat.HasProperty("_Color"))
+        {
+            childMat.SetColor("_Color", color);
+
+        }
+    }
 }

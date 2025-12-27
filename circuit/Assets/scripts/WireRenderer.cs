@@ -36,13 +36,13 @@ public class WireRenderer : MonoBehaviour
 
         GameObject prefab = GetPrefab(type);
         Vector3 pos = new Vector3((x - 0.5f) * tileSize, 0.1f, (y - 0.5f) * tileSize);
-        
+
         // Apply rotation (0 = 0бу, 1 = 90бу, 2 = 180бу, 3 = 270бу)
         Quaternion rotationQuat = Quaternion.Euler(0, rotation * 90, 0);
 
         wireObjects[x, y] = Instantiate(prefab, pos, rotationQuat, transform);
         wireObjects[x, y].name = $"Wire_{type}_{x}_{y}_R{rotation}";
-        
+
         Debug.Log($"Rendered wire of type {type} at ({x}, {y}) with rotation {rotation * 90}бу");
     }
 
@@ -88,6 +88,52 @@ public class WireRenderer : MonoBehaviour
     public void RefreshWire(int x, int y, WireType type, int rotation)
     {
         RenderWire(x, y, type, rotation);
+    }
+
+    // Highlight single tile with color
+    public void HighlightTile(Vector2Int pos, Color color)
+    {
+        GameObject tile = GetWireObject(pos.x, pos.y);
+        if (tile != null)
+        {
+            CircuitBlock circuitBlock = tile.GetComponent<CircuitBlock>();
+            if (circuitBlock != null)
+            {
+                circuitBlock.SetColor(color);
+            }
+        }
+    }
+
+    // Set all circuit blocks to a specific color
+    public void SetAllCircuitBlocksColor(Color color)
+    {
+        for (int x = 0; x < wireObjects.GetLength(0); x++)
+        {
+            for (int y = 0; y < wireObjects.GetLength(1); y++)
+            {
+                GameObject tile = wireObjects[x, y];
+                if (tile != null)
+                {
+                    CircuitBlock circuitBlock = tile.GetComponent<CircuitBlock>();
+                    if (circuitBlock != null)
+                    {
+                        circuitBlock.SetColor(color);
+                    }
+                }
+            }
+        }
+    }
+
+    // Animate path with color sequence
+    public IEnumerator AnimatePath(List<Vector2Int> path, Color color, float delayBetweenSteps = 0.3f)
+    {
+        foreach (Vector2Int pos in path)
+        {
+            HighlightTile(pos, color);
+            yield return new WaitForSeconds(delayBetweenSteps);
+        }
+
+        Debug.Log("Finished animating path");
     }
 
     GameObject GetPrefab(WireType type)
