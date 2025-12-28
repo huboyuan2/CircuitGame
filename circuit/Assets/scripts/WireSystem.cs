@@ -58,7 +58,26 @@ public class WireSystem : MonoBehaviour
     private const int WIRE_TYPE_MASK = 0xFF;       // 0b11111111 - bits 0-7 (WireType)
     private const int ROTATION_MASK = 0x300;       // 0b1100000000 - bits 8-9 (rotation)
     private const int ROTATION_SHIFT = 8;
+    private static WireSystem _instance;
+    public static WireSystem Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                _instance = FindObjectOfType<WireSystem>();
 
+                // If still not found, create a new GameObject with WireSystem
+                if (_instance == null)
+                {
+                    GameObject singletonObject = new GameObject("WireSystem");
+                    _instance = singletonObject.AddComponent<WireSystem>();
+                    DontDestroyOnLoad(singletonObject);
+                }
+            }
+            return _instance;
+        }
+    }
     void Awake()
     {
         width = mapSystem.width;

@@ -33,6 +33,10 @@ public class GameController : MonoBehaviour
             Debug.Log("YOU WIN!");
             // Later: show UI, go to next level, etc.
         }
+        else
+        {
+            Debug.Log("Not yet complete.");
+        }
     }
 }
 

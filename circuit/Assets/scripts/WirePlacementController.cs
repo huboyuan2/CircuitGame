@@ -33,7 +33,26 @@ public class WirePlacementController : MonoBehaviour
     private Vector3 mouseDownPosition;
     private int selectedGridX = -1;
     private int selectedGridY = -1;
+    private static WirePlacementController _instance;
+    public static WirePlacementController Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                _instance = FindObjectOfType<WirePlacementController>();
 
+                // If still not found, create a new GameObject with WirePlacementController
+                if (_instance == null)
+                {
+                    GameObject singletonObject = new GameObject("WirePlacementController");
+                    _instance = singletonObject.AddComponent<WirePlacementController>();
+                    DontDestroyOnLoad(singletonObject);
+                }
+            }
+            return _instance;
+        }
+    }
     void Update()
     {
         // Mode switching with Tab key
