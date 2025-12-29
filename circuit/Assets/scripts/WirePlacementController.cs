@@ -1,12 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
-public enum EditorMode
-{
-    Build,  // Build mode: place wires
-    Edit    // Edit mode: rotate and swap wires
-}
+using UnityEngine.EventSystems;
 
 public class WirePlacementController : MonoBehaviour
 {
@@ -14,25 +9,25 @@ public class WirePlacementController : MonoBehaviour
     public GameController gameController;
     public WireSystem wireSystem;
     public WireRenderer wireRenderer;
+    public ToolKitView toolKitView; // Reference to ToolKit UI
 
-    [Header("Editor Mode")]
-    public EditorMode currentMode = EditorMode.Build;
-
-    [Header("Build Mode Settings")]
+    [Header("Build Settings")]
     public WireType currentWireType = WireType.Normal;
-    public int currentRotation = 0; // Current rotation for placing wires
 
-    [Header("Edit Mode Settings")]
+    [Header("Selection Settings")]
+    [SerializeField] private float clickThreshold = 0.2f; // Click detection time threshold
     [SerializeField] private float dragThreshold = 10f;
 
-    // Drag and drop related variables (for Edit mode)
     private GameObject selectedWireObject = null;
     private Vector3 dragOffset;
     private bool isDragging = false;
     private Vector3 originalPosition;
     private Vector3 mouseDownPosition;
+    private float mouseDownTime;
     private int selectedGridX = -1;
     private int selectedGridY = -1;
+    private bool isToolKitActive = false; // ToolKit activation state
+
     private static WirePlacementController _instance;
     public static WirePlacementController Instance
     {
@@ -41,8 +36,6 @@ public class WirePlacementController : MonoBehaviour
             if (_instance == null)
             {
                 _instance = FindObjectOfType<WirePlacementController>();
-
-                // If still not found, create a new GameObject with WirePlacementController
                 if (_instance == null)
                 {
                     GameObject singletonObject = new GameObject("WirePlacementController");
@@ -53,118 +46,35 @@ public class WirePlacementController : MonoBehaviour
             return _instance;
         }
     }
+
     void Update()
     {
-        // Mode switching with Tab key
-        if (Input.GetKeyDown(KeyCode.Tab))
-        {
-            ToggleMode();
-        }
-
-        // Handle input based on current mode
-        if (currentMode == EditorMode.Build)
-        {
-            HandleBuildMode();
-        }
-        else
-        {
-            HandleEditMode();
-        }
+        HandleInput();
     }
 
-    void ToggleMode()
+    void HandleInput()
     {
-        currentMode = (currentMode == EditorMode.Build) ? EditorMode.Edit : EditorMode.Build;
-        Debug.Log($"Switched to {currentMode} mode");
-
-        // Reset edit mode state when switching
-        if (currentMode == EditorMode.Build)
+        // Check if clicking on UI
+        if (IsPointerOverUI())
         {
-            ResetDrag();
+            return; // If clicking on UI, return directly without processing game logic
         }
-    }
 
-    #region Build Mode
-
-    void HandleBuildMode()
-    {
-        // Left click to place wire
+        // Unified handling of mouse and touch input
         if (Input.GetMouseButtonDown(0))
         {
-            TryPlaceWireAtMouse();
+            StartInteraction(Input.mousePosition);
         }
-
-        // Switch wire type with +/- keys
-        if (Input.GetKeyDown(KeyCode.Equals))
-        {
-            int nextType = (int)currentWireType + 1;
-            int enumLength = System.Enum.GetValues(typeof(WireType)).Length;
-            currentWireType = (WireType)(nextType % enumLength);
-            Debug.Log($"Switched to wire type: {currentWireType}");
-        }
-        if (Input.GetKeyDown(KeyCode.Minus))
-        {
-            int prevType = (int)currentWireType - 1;
-            int enumLength = System.Enum.GetValues(typeof(WireType)).Length;
-            currentWireType = (WireType)((prevType + enumLength) % enumLength);
-            Debug.Log($"Switched to wire type: {currentWireType}");
-        }
-
-        // Rotate preview with R key
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            TryRotateWireAtMouse(clockwise: true);
-            //currentRotation = (currentRotation + 1) % 4;
-            //Debug.Log($"Current build rotation: {currentRotation * 90}бу");
-        }
-    }
-
-    void TryPlaceWireAtMouse()
-    {
-        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
-        RaycastHit hit;
-
-        if (Physics.Raycast(ray, out hit, 100f))
-        {
-            Vector3 pos = hit.point;
-
-            int x = Mathf.FloorToInt(pos.x / gameController.mapRenderer.tileSize) + 1;
-            int y = Mathf.FloorToInt(pos.z / gameController.mapRenderer.tileSize) + 1;
-
-            // Place wire with current rotation
-            if (wireSystem.PlaceWire(x, y, currentWireType, currentRotation))
-            {
-                Debug.Log($"Placed wire of type {currentWireType} at ({x}, {y}) with rotation {currentRotation * 90}бу");
-
-                // Render with rotation
-                wireRenderer.RenderWire(x, y, currentWireType, currentRotation);
-
-                gameController.CheckWinCondition();
-            }
-        }
-    }
-
-    #endregion
-
-    #region Edit Mode
-
-    void HandleEditMode()
-    {
-        // Start detection
-        if (Input.GetMouseButtonDown(0))
-        {
-            StartDragWire(Input.mousePosition);
-        }
-        // Hold down, check if threshold exceeded
         else if (Input.GetMouseButton(0) && selectedWireObject != null)
         {
             float dragDistance = Vector3.Distance(Input.mousePosition, mouseDownPosition);
+            float holdTime = Time.time - mouseDownTime;
 
-            // Only start dragging if movement exceeds threshold
-            if (!isDragging && dragDistance > dragThreshold)
+            // Start dragging when exceeding threshold
+            if (!isDragging && dragDistance > dragThreshold && holdTime > clickThreshold)
             {
                 isDragging = true;
-                // Optional: add visual feedback (e.g., transparency)
+                HideToolKit(); // Hide ToolKit when dragging
             }
 
             if (isDragging)
@@ -172,7 +82,6 @@ public class WirePlacementController : MonoBehaviour
                 DragWire(Input.mousePosition);
             }
         }
-        // Release mouse
         else if (Input.GetMouseButtonUp(0))
         {
             if (isDragging)
@@ -181,58 +90,167 @@ public class WirePlacementController : MonoBehaviour
             }
             else if (selectedWireObject != null)
             {
-                // No drag, treat as click, perform clockwise rotation
-                PerformRotation(selectedGridX, selectedGridY, clockwise: true);
+                // Short click, treat as selection
+                float clickDuration = Time.time - mouseDownTime;
+                if (clickDuration < clickThreshold)
+                {
+                    HandleSelection(selectedGridX, selectedGridY);
+                }
             }
-            ResetDrag();
+            else
+            {
+                // Click on empty tile, try to build (only when ToolKit is not active)
+                if (!isToolKitActive)
+                {
+                    TryPlaceWireAtMouse(Input.mousePosition);
+                }
+                else
+                {
+                    // Close ToolKit when clicking on empty space
+                    HideToolKit();
+                }
+            }
+            ResetInteraction();
         }
-        // Right-click for counter-clockwise rotation
-        else if (Input.GetMouseButtonDown(1))
+
+        // Hotkeys to switch wire type (optional to keep)
+        if (Input.GetKeyDown(KeyCode.Equals))
         {
-            TryRotateWireAtMouse(clockwise: false);
+            CycleWireType(1);
+        }
+        if (Input.GetKeyDown(KeyCode.Minus))
+        {
+            CycleWireType(-1);
+        }
+
+        // ESC key to close ToolKit
+        if (Input.GetKeyDown(KeyCode.Escape) && isToolKitActive)
+        {
+            HideToolKit();
         }
     }
 
-    void StartDragWire(Vector3 screenPosition)
+    /// <summary>
+    /// Check if mouse/touch is over UI
+    /// </summary>
+    private bool IsPointerOverUI()
+    {
+        // Mobile touch detection
+        if (Input.touchCount > 0)
+        {
+            return EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
+        }
+        // PC mouse detection
+        else
+        {
+            return EventSystem.current.IsPointerOverGameObject();
+        }
+    }
+
+    void StartInteraction(Vector3 screenPosition)
     {
         if (mainCamera == null) return;
 
         Ray ray = mainCamera.ScreenPointToRay(screenPosition);
         RaycastHit hit;
 
+        mouseDownPosition = screenPosition;
+        mouseDownTime = Time.time;
+
         if (Physics.Raycast(ray, out hit))
         {
-            // Check if hit a wire object
-            GameObject hitObject = hit.collider.gameObject;
-
-            // Convert hit position to grid coordinates
             Vector3 pos = hit.point;
             int x = Mathf.FloorToInt(pos.x / gameController.mapRenderer.tileSize) + 1;
             int y = Mathf.FloorToInt(pos.z / gameController.mapRenderer.tileSize) + 1;
 
-            // Check if there's a wire at this position
             WireType wireType = wireSystem.GetWireType(x, y);
             if (wireType != WireType.None)
             {
-                selectedWireObject = hitObject;
+                // Select existing wire
+                selectedWireObject = hit.collider.gameObject;
                 selectedGridX = x;
                 selectedGridY = y;
-                mouseDownPosition = screenPosition;
-                originalPosition = hitObject.transform.position;
-
-                // Calculate offset between mouse click position and object center
-                dragOffset = hitObject.transform.position - hit.point;
+                originalPosition = hit.collider.transform.position;
+                dragOffset = hit.collider.transform.position - hit.point;
             }
         }
     }
+
+    /// <summary>
+    /// Handle selection logic, show ToolKit
+    /// </summary>
+    void HandleSelection(int x, int y)
+    {
+        if (wireSystem.GetWireType(x, y) == WireType.None)
+            return;
+
+        selectedGridX = x;
+        selectedGridY = y;
+
+        // Calculate world coordinates
+        Vector3 worldPos = new Vector3(
+            (x - 0.5f) * gameController.mapRenderer.tileSize,
+            0.1f,
+            (y - 0.5f) * gameController.mapRenderer.tileSize
+        );
+
+        // Show ToolKit and track position
+        ShowToolKit(worldPos);
+
+        Debug.Log($"Selected wire at ({x}, {y})");
+    }
+
+    void ShowToolKit(Vector3 worldPosition)
+    {
+        if (toolKitView == null) return;
+
+        toolKitView.gameObject.SetActive(true);
+        toolKitView.TrackLocation(worldPosition);
+        isToolKitActive = true; // Mark ToolKit as activated
+    }
+
+    void HideToolKit()
+    {
+        if (toolKitView != null)
+        {
+            toolKitView.gameObject.SetActive(false);
+        }
+        isToolKitActive = false; // Mark ToolKit as closed
+        //selectedGridX = -1;
+        //selectedGridY = -1;
+    }
+
+    void TryPlaceWireAtMouse(Vector3 screenPosition)
+    {
+        Ray ray = mainCamera.ScreenPointToRay(screenPosition);
+        RaycastHit hit;
+
+        if (Physics.Raycast(ray, out hit, 100f))
+        {
+            Vector3 pos = hit.point;
+            int x = Mathf.FloorToInt(pos.x / gameController.mapRenderer.tileSize) + 1;
+            int y = Mathf.FloorToInt(pos.z / gameController.mapRenderer.tileSize) + 1;
+
+            // Build on empty tile
+            if (wireSystem.GetWireType(x, y) == WireType.None)
+            {
+                if (wireSystem.PlaceWire(x, y, currentWireType, 0))
+                {
+                    Debug.Log($"Placed wire of type {currentWireType} at ({x}, {y})");
+                    wireRenderer.RenderWire(x, y, currentWireType, 0);
+                    gameController.CheckWinCondition();
+                }
+            }
+        }
+    }
+
+    #region Drag related (keep original logic)
 
     void DragWire(Vector3 screenPosition)
     {
         if (selectedWireObject == null || mainCamera == null) return;
 
         Ray ray = mainCamera.ScreenPointToRay(screenPosition);
-
-        // Drag on the same Y plane as the original object
         Plane dragPlane = new Plane(Vector3.up, originalPosition);
         float distance;
 
@@ -253,39 +271,31 @@ public class WirePlacementController : MonoBehaviour
         Ray ray = mainCamera.ScreenPointToRay(screenPosition);
         RaycastHit hit;
 
-        // Get source wire info
         WireType sourceWireType = wireSystem.GetWireType(selectedGridX, selectedGridY);
         int sourceRotation = wireSystem.GetRotation(selectedGridX, selectedGridY);
 
-        // Detect release position
         if (Physics.Raycast(ray, out hit))
         {
             Vector3 pos = hit.point;
             int targetX = Mathf.FloorToInt(pos.x / gameController.mapRenderer.tileSize) + 1;
             int targetY = Mathf.FloorToInt(pos.z / gameController.mapRenderer.tileSize) + 1;
 
-            // Check if target is the same as source
             if (targetX == selectedGridX && targetY == selectedGridY)
             {
-                // Same position, just restore
                 selectedWireObject.transform.position = originalPosition;
                 return;
             }
 
-            // Check if target position has a wire
             WireType targetWireType = wireSystem.GetWireType(targetX, targetY);
 
             if (targetWireType != WireType.None)
             {
-                // Target has a wire - perform swap
+                // Swap wires
                 if (wireSystem.SwapWires(selectedGridX, selectedGridY, targetX, targetY))
                 {
                     Debug.Log($"Swapped wires at ({selectedGridX},{selectedGridY}) with ({targetX},{targetY})");
 
-                    // Update visual positions
                     GameObject targetWireObject = hit.collider.gameObject;
-
-                    // Calculate grid center positions
                     Vector3 sourceGridPos = new Vector3(
                         (selectedGridX - 0.5f) * gameController.mapRenderer.tileSize,
                         0.1f,
@@ -299,45 +309,33 @@ public class WirePlacementController : MonoBehaviour
 
                     selectedWireObject.transform.position = targetGridPos;
                     targetWireObject.transform.position = sourceGridPos;
-
-                    // Update renderer's internal reference array
                     wireRenderer.SwapWireObjects(selectedGridX, selectedGridY, targetX, targetY);
-
-                    // Check win condition after swap
                     gameController.CheckWinCondition();
                 }
                 else
                 {
-                    // Swap failed, restore original position
                     selectedWireObject.transform.position = originalPosition;
                 }
             }
             else
             {
-                // Target is empty - try to move wire to empty floor tile
+                // Move to empty tile
                 if (wireSystem.MoveWire(selectedGridX, selectedGridY, targetX, targetY))
                 {
                     Debug.Log($"Moved wire from ({selectedGridX},{selectedGridY}) to ({targetX},{targetY})");
 
-                    // Calculate new grid position
                     Vector3 targetGridPos = new Vector3(
                         (targetX - 0.5f) * gameController.mapRenderer.tileSize,
                         0.1f,
                         (targetY - 0.5f) * gameController.mapRenderer.tileSize
                     );
 
-                    // Update visual position
                     selectedWireObject.transform.position = targetGridPos;
-
-                    // Update renderer's internal reference array
                     wireRenderer.MoveWireObject(selectedGridX, selectedGridY, targetX, targetY);
-
-                    // Check win condition after move
                     gameController.CheckWinCondition();
                 }
                 else
                 {
-                    // Move failed (not a valid floor tile), restore original position
                     Debug.Log($"Cannot move wire to ({targetX},{targetY}) - not a valid floor tile");
                     selectedWireObject.transform.position = originalPosition;
                 }
@@ -345,73 +343,80 @@ public class WirePlacementController : MonoBehaviour
         }
         else
         {
-            // Released to empty area (no raycast hit), restore original position
             selectedWireObject.transform.position = originalPosition;
         }
     }
 
-    void ResetDrag()
+    void ResetInteraction()
     {
         selectedWireObject = null;
         isDragging = false;
         dragOffset = Vector3.zero;
         mouseDownPosition = Vector3.zero;
-        selectedGridX = -1;
-        selectedGridY = -1;
+        // Note: Do not reset selectedGridX/Y, keep selection state
     }
 
-    void TryRotateWireAtMouse(bool clockwise)
+    #endregion
+
+    #region ToolKit button callbacks
+
+    public void TryRotateWireAtMouse(bool clockwise)
     {
-        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
-        RaycastHit hit;
+        if (selectedGridX < 0 || selectedGridY < 0)
+            return;
 
-        if (Physics.Raycast(ray, out hit, 100f))
-        {
-            Vector3 pos = hit.point;
-            int x = Mathf.FloorToInt(pos.x / gameController.mapRenderer.tileSize) + 1;
-            int y = Mathf.FloorToInt(pos.z / gameController.mapRenderer.tileSize) + 1;
-
-            PerformRotation(x, y, clockwise);
-        }
-    }
-
-    void PerformRotation(int x, int y, bool clockwise)
-    {
-        WireType wireType = wireSystem.GetWireType(x, y);
+        WireType wireType = wireSystem.GetWireType(selectedGridX, selectedGridY);
         if (wireType == WireType.None)
             return;
 
-        // Update rotation in WireSystem (this updates the int array)
-        wireSystem.RotateWire(x, y, clockwise);
-
-        // Get new rotation state
-        int newRotation = wireSystem.GetRotation(x, y);
-
-        // Re-render wire with new rotation
-        wireRenderer.RefreshWire(x, y, wireType, newRotation);
+        wireSystem.RotateWire(selectedGridX, selectedGridY, clockwise);
+        int newRotation = wireSystem.GetRotation(selectedGridX, selectedGridY);
+        wireRenderer.RefreshWire(selectedGridX, selectedGridY, wireType, newRotation);
 
         string direction = clockwise ? "clockwise" : "counter-clockwise";
-        Debug.Log($"Rotated wire at ({x},{y}) {direction} to {newRotation * 90}бу");
+        Debug.Log($"Rotated wire at ({selectedGridX},{selectedGridY}) {direction} to {newRotation * 90}бу");
 
-        // Check win condition after rotation
         gameController.CheckWinCondition();
+    }
+
+    public void TryDeleteWireAtMouse()
+    {
+        if (selectedGridX < 0 || selectedGridY < 0)
+            return;
+
+        if (wireSystem.PlaceWire(selectedGridX, selectedGridY, WireType.None, 0))
+        {
+            Debug.Log($"Deleted wire at ({selectedGridX}, {selectedGridY})");
+            wireRenderer.RenderWire(selectedGridX, selectedGridY, WireType.None, 0);
+            HideToolKit();
+            gameController.CheckWinCondition();
+        }
+    }
+
+    #endregion
+
+    #region Helper methods
+
+    void CycleWireType(int direction)
+    {
+        int nextType = (int)currentWireType + direction;
+        int enumLength = System.Enum.GetValues(typeof(WireType)).Length;
+        currentWireType = (WireType)((nextType + enumLength) % enumLength);
+        Debug.Log($"Switched to wire type: {currentWireType}");
     }
 
     #endregion
 
     void OnGUI()
     {
-        // Display current mode in top-left corner
-        GUI.Label(new Rect(10, 10, 300, 30), $"Mode: {currentMode} (Press Tab to switch)");
-
-        if (currentMode == EditorMode.Build)
+        GUI.Label(new Rect(10, 10, 300, 30), $"Current Wire: {currentWireType} (+/- to change)");
+        if (selectedGridX >= 0 && selectedGridY >= 0)
         {
-            GUI.Label(new Rect(10, 40, 300, 30), $"Current Wire: {currentWireType} (+/- to change)");
-            GUI.Label(new Rect(10, 70, 300, 30), $"Rotation: (Press R to rotate)");
+            GUI.Label(new Rect(10, 40, 300, 30), $"Selected: ({selectedGridX}, {selectedGridY})");
         }
-        else
+        if (isToolKitActive)
         {
-            GUI.Label(new Rect(10, 40, 400, 30), "Left Click: Rotate | Drag: Swap/Move | Right Click: Counter-rotate");
+            GUI.Label(new Rect(10, 70, 300, 30), "ToolKit Active (ESC to close)");
         }
     }
 }
