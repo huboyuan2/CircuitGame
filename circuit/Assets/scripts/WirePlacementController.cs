@@ -28,6 +28,9 @@ public class WirePlacementController : MonoBehaviour
     private int selectedGridY = -1;
     private bool isToolKitActive = false; // ToolKit activation state
 
+    // Static flag to prevent input conflicts with UI drag operations
+    public static bool isUIBeingDragged = false;
+
     private static WirePlacementController _instance;
     public static WirePlacementController Instance
     {
@@ -54,10 +57,10 @@ public class WirePlacementController : MonoBehaviour
 
     void HandleInput()
     {
-        // Check if clicking on UI
-        if (IsPointerOverUI())
+        // Check if clicking on UI or UI is being dragged
+        if (IsPointerOverUI() || isUIBeingDragged)
         {
-            return; // If clicking on UI, return directly without processing game logic
+            return; // If clicking on UI or UI drag in progress, skip game logic
         }
 
         // Unified handling of mouse and touch input
@@ -231,15 +234,100 @@ public class WirePlacementController : MonoBehaviour
             int x = Mathf.FloorToInt(pos.x / gameController.mapRenderer.tileSize) + 1;
             int y = Mathf.FloorToInt(pos.z / gameController.mapRenderer.tileSize) + 1;
 
-            // Build on empty tile
-            if (wireSystem.GetWireType(x, y) == WireType.None)
+            // Use the unified placement logic
+            PlaceWireAtPosition(x, y, currentWireType, "click");
+        }
+    }
+
+    /// <summary>
+    /// Unified wire placement logic with WireLimit management
+    /// </summary>
+    /// <param name="x">Grid X coordinate</param>
+    /// <param name="y">Grid Y coordinate</param>
+    /// <param name="newWireType">Wire type to place</param>
+    /// <param name="source">Source of placement (for logging)</param>
+    /// <returns>True if placement succeeded</returns>
+    public bool PlaceWireAtPosition(int x, int y, WireType newWireType, string source = "")
+    {
+        // Get existing wire type at this position
+        WireType existingWireType = wireSystem.GetWireType(x, y);
+
+        Debug.Log($"[{source}] Attempting to place {newWireType} at ({x}, {y}). Existing: {existingWireType}");
+
+        // Build on empty tile or replace existing wire
+        if (existingWireType == WireType.None)
+        {
+            // Placing on empty tile - just consume
+            if (WireLimitManager.Instance != null && !WireLimitManager.Instance.TryConsumeWire(newWireType))
             {
-                if (wireSystem.PlaceWire(x, y, currentWireType, 0))
+                Debug.LogWarning($"Cannot place {newWireType}: limit reached!");
+                return false;
+            }
+
+            // Try to build
+            if (wireSystem.PlaceWire(x, y, newWireType, 0))
+            {
+                Debug.Log($"[{source}] Placed wire of type {newWireType} at ({x}, {y})");
+                wireRenderer.RenderWire(x, y, newWireType, 0);
+                gameController.CheckWinCondition();
+                return true;
+            }
+            else
+            {
+                // Placement failed, return the wire
+                if (WireLimitManager.Instance != null)
                 {
-                    Debug.Log($"Placed wire of type {currentWireType} at ({x}, {y})");
-                    wireRenderer.RenderWire(x, y, currentWireType, 0);
-                    gameController.CheckWinCondition();
+                    WireLimitManager.Instance.ReturnWire(newWireType);
                 }
+                Debug.LogWarning($"[{source}] Failed to place {newWireType} at ({x}, {y})");
+                return false;
+            }
+        }
+        else
+        {
+            // Replacing existing wire
+            // First check if we can place the new wire
+            if (WireLimitManager.Instance != null && !WireLimitManager.Instance.CanPlaceWire(newWireType))
+            {
+                Debug.LogWarning($"Cannot place {newWireType}: limit reached!");
+                return false;
+            }
+
+            // Return the old wire first
+            if (WireLimitManager.Instance != null)
+            {
+                WireLimitManager.Instance.ReturnWire(existingWireType);
+                Debug.Log($"[{source}] Returned {existingWireType}");
+            }
+
+            // Consume the new wire
+            if (WireLimitManager.Instance != null && !WireLimitManager.Instance.TryConsumeWire(newWireType))
+            {
+                // This shouldn't happen since we checked CanPlaceWire, but handle it anyway
+                Debug.LogError($"Failed to consume {newWireType} after returning {existingWireType}");
+                // Re-consume the old wire to maintain consistency
+                WireLimitManager.Instance.TryConsumeWire(existingWireType);
+                return false;
+            }
+
+            // Place the new wire
+            if (wireSystem.PlaceWire(x, y, newWireType, 0))
+            {
+                Debug.Log($"[{source}] Replaced {existingWireType} with {newWireType} at ({x}, {y})");
+                wireRenderer.RenderWire(x, y, newWireType, 0);
+                gameController.CheckWinCondition();
+                return true;
+            }
+            else
+            {
+                // Placement failed, restore the old wire count
+                if (WireLimitManager.Instance != null)
+                {
+                    WireLimitManager.Instance.ReturnWire(newWireType);
+                    WireLimitManager.Instance.TryConsumeWire(existingWireType);
+                }
+                Debug.LogWarning($"[{source}] Failed to replace at ({x}, {y})");
+                return false;
             }
         }
     }
@@ -384,8 +472,16 @@ public class WirePlacementController : MonoBehaviour
         if (selectedGridX < 0 || selectedGridY < 0)
             return;
 
+        WireType wireType = wireSystem.GetWireType(selectedGridX, selectedGridY);
+
         if (wireSystem.PlaceWire(selectedGridX, selectedGridY, WireType.None, 0))
         {
+            // Return the wire to available count
+            if (WireLimitManager.Instance != null)
+            {
+                WireLimitManager.Instance.ReturnWire(wireType);
+            }
+
             Debug.Log($"Deleted wire at ({selectedGridX}, {selectedGridY})");
             wireRenderer.RenderWire(selectedGridX, selectedGridY, WireType.None, 0);
             HideToolKit();

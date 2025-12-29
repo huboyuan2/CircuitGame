@@ -909,6 +909,76 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 13984245678801540b16d7ad54d28664, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1 &2060613496
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2060613498}
+  - component: {fileID: 2060613497}
+  m_Layer: 0
+  m_Name: WireLimitMgr
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2060613497
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2060613496}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 17e9792a2141ccd41aacf2140fa95583, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  wireLimits:
+  - wireType: 1
+    maxCount: 2
+    currentCount: 0
+  - wireType: 2
+    maxCount: 3
+    currentCount: 0
+  - wireType: 3
+    maxCount: 1
+    currentCount: 0
+  - wireType: 4
+    maxCount: 2
+    currentCount: 0
+  - wireType: 5
+    maxCount: 2
+    currentCount: 0
+  - wireType: 6
+    maxCount: 3
+    currentCount: 0
+  - wireType: 7
+    maxCount: 3
+    currentCount: 0
+  - wireType: 8
+    maxCount: 6
+    currentCount: 0
+  allowUnlimitedIfNotDefined: 1
+--- !u!4 &2060613498
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2060613496}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 20.738724, y: -9.456879, z: 13.028896}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &1442692104173051091
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1148,3 +1218,4 @@ SceneRoots:
   - {fileID: 906581216}
   - {fileID: 875710006}
   - {fileID: 960959628}
+  - {fileID: 2060613498}

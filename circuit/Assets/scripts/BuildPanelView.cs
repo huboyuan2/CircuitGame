@@ -15,6 +15,9 @@ public class BuildPanelView : MonoBehaviour
         if (ButtonParent == null)
             ButtonParent = this.transform.Find("Image");
         WireRenderer.OnIconsReady += HandleIcons;
+        
+        // Subscribe to wire limit changes for UI updates
+        WireLimitManager.OnWireCountChanged += OnWireCountChanged;
     }
 
     void HandleIcons()
@@ -22,7 +25,13 @@ public class BuildPanelView : MonoBehaviour
         foreach (var icon in WireRenderer.Instance.wireIconDict)
         {
             var button = Instantiate(ButtonObj, ButtonParent);
-            button.GetComponentInChildren<TextMeshProUGUI>().text = icon.Key.ToString();
+            
+            // Set button text to show wire type and count
+            var textMesh = button.GetComponentInChildren<TextMeshProUGUI>();
+            if (textMesh != null)
+            {
+                UpdateButtonText(textMesh, icon.Key);
+            }
 
             var rawImage = button.GetComponent<RawImage>();
             if (rawImage != null && icon.Value is RenderTexture)
@@ -33,6 +42,7 @@ public class BuildPanelView : MonoBehaviour
             // Add drag component
             var dragHandler = button.AddComponent<WireButtonDragHandler>();
             dragHandler.wireType = icon.Key;
+            dragHandler.buttonTextMesh = textMesh; // Pass reference for updates
 
             // Click to directly select wire type
             button.GetComponent<Button>()?.onClick.AddListener(() => {
@@ -42,9 +52,46 @@ public class BuildPanelView : MonoBehaviour
         }
     }
 
+    private void OnWireCountChanged(WireType wireType, int current, int max)
+    {
+        // Update UI when wire count changes
+        UpdateAllButtonTexts();
+    }
+
+    private void UpdateAllButtonTexts()
+    {
+        // Update all button texts to reflect current counts
+        var dragHandlers = GetComponentsInChildren<WireButtonDragHandler>();
+        foreach (var handler in dragHandlers)
+        {
+            if (handler.buttonTextMesh != null)
+            {
+                UpdateButtonText(handler.buttonTextMesh, handler.wireType);
+            }
+        }
+    }
+
+    private void UpdateButtonText(TextMeshProUGUI textMesh, WireType wireType)
+    {
+        if (WireLimitManager.Instance != null && WireLimitManager.Instance.HasLimit(wireType))
+        {
+            int remaining = WireLimitManager.Instance.GetRemainingCount(wireType);
+            int max = WireLimitManager.Instance.GetMaxCount(wireType);
+            textMesh.text = $"{wireType}\n{remaining}/{max}";
+            
+            // Optional: Change color if limit reached
+            textMesh.color = remaining > 0 ? Color.white : Color.red;
+        }
+        else
+        {
+            textMesh.text = wireType.ToString();
+        }
+    }
+
     private void OnDestroy()
     {
         WireRenderer.OnIconsReady -= HandleIcons;
+        WireLimitManager.OnWireCountChanged -= OnWireCountChanged;
     }
 }
 
@@ -54,11 +101,10 @@ public class BuildPanelView : MonoBehaviour
 public class WireButtonDragHandler : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     public WireType wireType;
+    public TextMeshProUGUI buttonTextMesh; // Reference for updating display
 
     private GameObject dragPreview;
     private Camera mainCamera;
-    private Material previewMaterial;
-    private Color originalColor;
 
     void Start()
     {
@@ -67,6 +113,16 @@ public class WireButtonDragHandler : MonoBehaviour, IBeginDragHandler, IDragHand
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        // Set flag to prevent WirePlacementController from processing input
+        WirePlacementController.isUIBeingDragged = true;
+
+        // Check if wire limit allows placement
+        if (WireLimitManager.Instance != null && !WireLimitManager.Instance.CanPlaceWire(wireType))
+        {
+            Debug.LogWarning($"Cannot drag {wireType}: limit reached!");
+            return;
+        }
+
         // Get the actual wire prefab from WireRenderer based on wireType
         GameObject wirePrefab = WireRenderer.Instance.GetWirePrefab(wireType);
 
@@ -101,33 +157,41 @@ public class WireButtonDragHandler : MonoBehaviour, IBeginDragHandler, IDragHand
 
     public void OnEndDrag(PointerEventData eventData)
     {
-        // Detect release position
-        Ray ray = mainCamera.ScreenPointToRay(eventData.position);
-        RaycastHit hit;
-
-        if (Physics.Raycast(ray, out hit))
-        {
-            var controller = WirePlacementController.Instance;
-            Vector3 pos = hit.point;
-            int x = Mathf.FloorToInt(pos.x / controller.gameController.mapRenderer.tileSize) + 1;
-            int y = Mathf.FloorToInt(pos.z / controller.gameController.mapRenderer.tileSize) + 1;
-
-            // Try to build
-            if (controller.wireSystem.PlaceWire(x, y, wireType, 0))
-            {
-                Debug.Log($"Placed {wireType} at ({x}, {y}) via drag&drop");
-                controller.wireRenderer.RenderWire(x, y, wireType, 0);
-                controller.gameController.CheckWinCondition();
-            }
-        }
-
-        // Cleanup preview
+        // Only try to place if preview was created (limit check passed)
         if (dragPreview != null)
         {
+            // Detect release position
+            Ray ray = mainCamera.ScreenPointToRay(eventData.position);
+            RaycastHit hit;
+
+            if (Physics.Raycast(ray, out hit))
+            {
+                var controller = WirePlacementController.Instance;
+                Vector3 pos = hit.point;
+                int x = Mathf.FloorToInt(pos.x / controller.gameController.mapRenderer.tileSize) + 1;
+                int y = Mathf.FloorToInt(pos.z / controller.gameController.mapRenderer.tileSize) + 1;
+
+                // Use the unified placement logic from WirePlacementController
+                Debug.Log($"OnEndDrag: Attempting to place {wireType} at ({x}, {y})");
+                controller.PlaceWireAtPosition(x, y, wireType, "drag&drop");
+            }
+
+            // Cleanup preview
             Destroy(dragPreview);
         }
+
+        // Clear flag to allow WirePlacementController to process input again
+        // Use a small delay to ensure the MouseButtonUp event is not processed this frame
+        StartCoroutine(ClearUIBeingDraggedFlag());
     }
 
+    private IEnumerator ClearUIBeingDraggedFlag()
+    {
+        // Wait for end of frame to ensure all input events this frame are processed
+        yield return new WaitForEndOfFrame();
+        WirePlacementController.isUIBeingDragged = false;
+        Debug.Log("Cleared isUIBeingDragged flag");
+    }
     /// <summary>
     /// Calculate world position where ray intersects ground plane (y=0)
     /// </summary>
@@ -167,16 +231,7 @@ public class WireButtonDragHandler : MonoBehaviour, IBeginDragHandler, IDragHand
                     color.a = alpha;
                     mat.color = color;
                 }
-
-                // Set rendering mode to transparent if using standard shader
-                mat.SetFloat("_Mode", 3); // Transparent mode
-                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                mat.SetInt("_ZWrite", 0);
-                mat.DisableKeyword("_ALPHATEST_ON");
-                mat.EnableKeyword("_ALPHABLEND_ON");
-                mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-                mat.renderQueue = 3000;
+                mat.SetFloat("_ditheralpha", 1.5f);
             }
         }
     }
